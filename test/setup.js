@@ -5,6 +5,7 @@ const chai = require('chai')
 const sinonChai = require('sinon-chai')
 const proxyquire = require('proxyquire')
 const nock = require('nock')
+const semver = require('semver')
 const retry = require('retry')
 const pg = require('pg')
 const mysql = require('mysql')
@@ -33,6 +34,7 @@ global.expect = chai.expect
 global.proxyquire = proxyquire
 global.nock = nock
 global.wrapIt = wrapIt
+global.withVersions = withVersions
 
 platform.use(node)
 
@@ -96,8 +98,7 @@ function waitForMysql () {
     operation.attempt(currentAttempt => {
       const connection = mysql.createConnection({
         host: 'localhost',
-        user: 'user',
-        password: 'userpass',
+        user: 'root',
         database: 'db'
       })
 
@@ -232,4 +233,32 @@ function wrapIt () {
       })
     }
   }
+}
+
+function withVersions (plugin, moduleName, range, cb) {
+  const instrumentations = [].concat(plugin)
+  const testVersions = new Set()
+
+  if (!cb) {
+    cb = range
+    range = null
+  }
+
+  instrumentations
+    .filter(instrumentation => instrumentation.name === moduleName)
+    .forEach(instrumentation => {
+      instrumentation.versions
+        .filter(version => !range || semver.satisfies(version, range))
+        .forEach(version => {
+          testVersions.add(version)
+        })
+    })
+
+  testVersions.forEach(version => {
+    const min = semver.coerce(version).version
+    const max = require(`./plugins/versions/${moduleName}@${version}`).version()
+
+    describe(`with ${moduleName} ${version} (${min})`, () => cb(min))
+    describe(`with ${moduleName} ${version} (${max})`, () => cb(version))
+  })
 }
